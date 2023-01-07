@@ -1,5 +1,4 @@
 from os import path
-from matplotlib.cbook import file_requires_unicode
 import numpy as np
 from scipy import signal
 import scipy.io as scio

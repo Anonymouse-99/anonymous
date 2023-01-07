@@ -1,15 +1,24 @@
 # BayesEEGNet
 
-Since the MASS-SS3 and SEED datasets are not publicly available, we provide the code of BayesEEGNet on the ISRUC-S3 dataset.
+These are the core codes of BayesEEGNet. 
+
+> Since the MASS-SS3 and SEED datasets are not publicly available, we provide the code of BayesEEGNet on the ISRUC-S3 dataset.
+>
+> We will provide more code details when the paper is accepted.
 
 ## Validated environment
 
+- conda 4.13.0
 - Python 3.7
 - PyTorch 1.10
+- numpy 1.21.6
+- matplotlib 3.1.3
+- scikit-learn 1.0.2
+- scipy 1.7.3
 - Cuda 11.1
 - CuDNN 8.1
 
-## Pipeline
+## How to run
 
 - (1) Get dataset:
   
@@ -46,7 +55,7 @@ Since the MASS-SS3 and SEED datasets are not publicly available, we provide the 
     ```
 
 
-> Summary of the pipeline:
+> **Summary of commands to run:**
 >
 > ```bash
 > cd ./data

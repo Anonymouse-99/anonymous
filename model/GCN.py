@@ -7,19 +7,34 @@ import math
 class GCN(nn.Module):
     def __init__(self, in_features, out_features, num_node=None, bias=True, input_vector=False):
         super(GCN, self).__init__()
-        
+        # Initialize parameters
         self.in_features = in_features
         self.out_features = out_features
         self.bias = bias
         self.input_vector = input_vector
         self.num_node = num_node
         
+        # Initialize weights
         self.weight = Parameter(torch.randn(in_features, out_features))
         if bias:
             self.bias = Parameter(torch.randn(out_features))
         else:
             self.register_parameter('bias', None)
         self._reset_parameters()
+        
+        # Edge index mapping from vector to matrix
+        if input_vector:
+            t = 0
+            self.pair_i = []
+            self.pair_j = []
+            self.pair_t = []
+            for i in range(self.num_node):
+                for j in range(i+1, self.num_node):
+                    self.pair_i.append(i)
+                    self.pair_j.append(j)
+                    self.pair_t.append(t)
+                    t += 1
+
 
     def _reset_parameters(self):
         if (self.in_features == self.out_features):
@@ -31,6 +46,7 @@ class GCN(nn.Module):
         if self.bias is not None:
             init.uniform_(self.bias, -0, 0)
 
+
     def forward(self, X, A):
         '''
         A: [N,V,V] or [V,V]
@@ -38,35 +54,32 @@ class GCN(nn.Module):
         '''
         if self.input_vector:
             A = self.vector2matrix(A)
-            #print(A.shape, X.shape, self.weight.shape, self.bias.shape)
             return torch.matmul(torch.matmul(A, X), self.weight) + self.bias, A
         else:
             return torch.matmul(torch.matmul(A, X), self.weight) + self.bias
+
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
             self.in_features, self.out_features, self.bias is not None)
     
+
     def vector2matrix(self, A):
-        if self.num_node is None:
-            num_node = int(math.sqrt(1+A.shape[-1]*8)+1)//2
+        '''
+        Mapping from vector to 2D matrix
+        A: [N, num_edges] or [num_edges]
+        '''
+        if len(A.shape)==2:
+            # [N, num_edges]
+            A_M = torch.zeros(A.shape[0], self.num_node, self.num_node).cuda()
+            A_M[:, self.pair_i, self.pair_j] = A[:, self.pair_t]
+            A_M[:, self.pair_j, self.pair_i] = A[:, self.pair_t]
         else:
-            num_node = self.num_node
-        if(len(A.shape)==2):
-            A_M = torch.zeros(A.shape[0], num_node, num_node).cuda()
-            eid = 0
-            for i in range(num_node):
-                for j in range(i):
-                    A_M[:,i,j] = A[:,eid]
-                    A_M[:,j,i] = A[:,eid]
-                    eid+=1
-        else:
-            A_M = torch.zeros(num_node, num_node).cuda()
-            eid = 0
-            for i in range(num_node):
-                for j in range(i):
-                    A_M[i,j] = A[eid]
-                    A_M[j,i] = A[eid]
-                    eid+=1
-        A_M += torch.eye(num_node).cuda()
+            # [num_edges]
+            A_M = torch.zeros(self.num_node, self.num_node).cuda()
+            A_M[self.pair_i, self.pair_j] = A[self.pair_t]
+            A_M[self.pair_j, self.pair_i] = A[self.pair_t]
+
+        # Add self-connection of nodes
+        A_M += torch.eye(self.num_node).cuda()
         return A_M

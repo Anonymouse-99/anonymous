@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Set the index of the GPU to be used
 
 from os import path
 import numpy as np
@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch
 from model.BayesEEGNet import BayesEEGNet
 from utils import *
-torch.set_num_threads(4)
+# torch.set_num_threads(4)  # Enable when you need to limit CPU usage
 
 
 print('=====Start=====', time.asctime(time.localtime(time.time())))
@@ -27,7 +27,7 @@ params = {
     'minEpoch': 100,
     'hiddenDim': 512,
     'num_nodes': 6,
-    'graph_dim': 512,
+    'graph_dim': 256,
     'lamada1': 1e-7,
     'lamada2': 1e-7,
     'targetDim': 5,
@@ -134,7 +134,7 @@ for i in range(othercfg['fold']):
         time_start = time.time()
 
         tr_acc, tr_loss, tr_kl1, tr_kl2 = train_epoch(model, trGen, params, loss_func, optimizer, epoch)
-        va_acc, va_loss, va_kl1, va_kl2 = val(model, cvGen, params, loss_func, epoch, False)
+        va_acc, va_loss, va_kl1, va_kl2 = val(model, cvGen, params, loss_func, epoch, False, False)
 
         if params['lr_decay']>0:
             lr_epoch = scheduler.get_last_lr()
@@ -173,7 +173,7 @@ for i in range(othercfg['fold']):
     print(time.asctime(time.localtime(time.time())))
     model.eval()
     model.load_state_dict(torch.load(othercfg['out_dir'] + 'best_model_' + str(i) + '.nnet.pth'))
-    _, _, _, _, pred, true, summ, spec = val(model, cvGen, params, loss_func, epoch, True)
+    _, _, _, _, pred, true, summ, spec = val(model, cvGen, params, loss_func, epoch, True, True)
     pred_list.append(pred)
     true_list.append(true)
     summ_graph_list.append(summ)

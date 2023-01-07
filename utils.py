@@ -9,12 +9,14 @@ from torch.utils.data import Dataset
 Some utility functions
 '''
 
+
 def set_random_seed(seed=0):
     np.random.seed(seed)
     random.seed(seed)
     torch.manual_seed(seed)  # cpu
     torch.cuda.manual_seed_all(seed)  # gpu
     torch.backends.cudnn.deterministic = True
+
 
 class SimpleDataset(Dataset):
     def __init__(self, x, y):
@@ -47,9 +49,9 @@ def train_epoch(model, train_loader, params , my_loss, optimizer, epoch, thresho
         optimizer.zero_grad()
         outputs = model(x)
 
-        loss_kl1 = params['lamada1'] * outputs['kl_g']
-        loss_kl2 = params['lamada2'] * outputs['kl_b']
-        loss = my_loss(outputs['y_hat'], y) + loss_kl1 + loss_kl2
+        loss_kl1 = outputs['kl_g']
+        loss_kl2 = outputs['kl_b']
+        loss = my_loss(outputs['y_hat'], y) + params['lamada1'] * loss_kl1 + params['lamada2'] * loss_kl2
 
         loss.backward()
 
@@ -65,14 +67,14 @@ def train_epoch(model, train_loader, params , my_loss, optimizer, epoch, thresho
         # print("[TR]epoch:%d, step:%d, loss:%f, l1:%f, l2:%f, acc:%f" %
         #       (epoch + 1, batch_idx, loss, result_dic['kl_g'], result_dic['kl_b'], (acc / total)))
     loss_mean = np.mean(loss_list)
-    loss_kl1_mean = np.mean(loss_kl1_list)
-    loss_kl2_mean = np.mean(loss_kl2_list)
+    loss_kl1_mean = np.mean(loss_kl1_list) / params['batchSize']
+    loss_kl2_mean = np.mean(loss_kl2_list) / params['batchSize']
     print("[TR]epoch:%d, loss:%f, l1:%f, l2:%f, acc:%f" %
           (epoch + 1, loss_mean, loss_kl1_mean, loss_kl2_mean, (acc / total)))
     return acc / total, loss_mean, loss_kl1_mean, loss_kl2_mean
 
 
-def val(model, val_loader, learning, my_loss, epoch, output=True):
+def val(model, val_loader, params, my_loss, epoch, predict_only=False, output=True):
     model.eval()
     acc = 0
     total = 0
@@ -90,11 +92,11 @@ def val(model, val_loader, learning, my_loss, epoch, output=True):
             x = x.cuda()
             y = y.cuda()
 
-            outputs = model(x)
+            outputs = model(x, predict_only)
 
-            loss_kl1 = learning['lamada1'] * outputs['kl_g']
-            loss_kl2 = learning['lamada2'] * outputs['kl_b']
-            loss = my_loss(outputs['y_hat'], y) + loss_kl1 + loss_kl2
+            loss_kl1 = outputs['kl_g']
+            loss_kl2 = outputs['kl_b']
+            loss = my_loss(outputs['y_hat'], y) + params['lamada1'] * loss_kl1 + params['lamada2'] * loss_kl2
 
             pred = torch.argmax(outputs['y_hat'].data, 1)
             pred_list.append(pred.cpu().numpy())
@@ -110,8 +112,8 @@ def val(model, val_loader, learning, my_loss, epoch, output=True):
                 spec_graph_list.append(outputs['spec_graph'].detach().cpu().numpy())
 
     loss_mean = np.mean(loss_list)
-    loss_kl1_mean = np.mean(loss_kl1_list)
-    loss_kl2_mean = np.mean(loss_kl2_list)
+    loss_kl1_mean = np.mean(loss_kl1_list) / params['batchSize']
+    loss_kl2_mean = np.mean(loss_kl2_list) / params['batchSize']
     print("[VA]epoch:%d, loss:%f, l1:%f, l2:%f, acc:%f" %
           (epoch + 1, loss_mean, loss_kl1_mean, loss_kl2_mean, (acc / total)), end='')
     
@@ -124,7 +126,6 @@ def val(model, val_loader, learning, my_loss, epoch, output=True):
             pred_list, true_list, summ_graph_list, spec_graph_list
     else:
         return acc / total, loss_mean, loss_kl1_mean, loss_kl2_mean
-
 
 
 def PrintScore(true, pred, savePath=None, average='macro',
@@ -212,6 +213,7 @@ def ConfusionMatrix(y_true, y_pred, savePath=None, title=None, cmap=plt.cm.Blues
         plt.savefig(savePath + title + ".png")
     plt.show()
     return ax
+
 
 def row2matrix(x, side):
     result = np.empty([side,side])

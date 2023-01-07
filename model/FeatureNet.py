@@ -30,9 +30,9 @@ def FeatureNet(s_freq, filters=128, dropout=0.5):
 Multi-channel EEG feature extraction
 '''
 class FeatureNet_MC(nn.Module):
-    def __init__(self, s_freq, filters=128):
+    def __init__(self, s_freq, filters=128, dropout=0.5):
         super(FeatureNet_MC, self).__init__()
-        self.tiny_model = FeatureNet(s_freq, filters)
+        self.tiny_model = FeatureNet(s_freq, filters, dropout)
 
     def forward(self, X):
         B, C, T = X.shape

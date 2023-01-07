@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from .GCN import GCN
 from .base_func import *
-
+import math
 #import warnings
 #warnings.filterwarnings('ignore')
 
@@ -20,8 +20,8 @@ class GraphBuilder(nn.Module):
         self.total_edges = int((num_nodes * (num_nodes-1)) / 2)
 
         # recurrence
-        self.gcn1 = GCN(self.g_dim, self.g_dim*4, num_node=num_nodes, input_vector=True)
-        self.gcn2 = GCN(self.g_dim*4, self.g_dim*4, num_node=num_nodes, input_vector=False)
+        self.gcn1 = GCN(self.h_dim, self.g_dim, num_node=num_nodes, input_vector=True)
+        self.gcn2 = GCN(self.g_dim, self.g_dim, num_node=num_nodes, input_vector=False)
 
         # prior
         self.prior_enc = encode_mean_std(self.g_dim, self.h_dim,
@@ -44,23 +44,21 @@ class GraphBuilder(nn.Module):
             nn.Dropout(self.dropout_rate),
             nn.Linear(self.g_dim, self.g_dim))
 
-    def forward(self, x):
+        # Edge index mapping
+        self.pair_i = []
+        self.pair_j = []
+        for i in range(self.num_nodes):
+            for j in range(i+1, self.num_nodes):
+                self.pair_i.append(i)
+                self.pair_j.append(j)
+
+    def forward(self, x, predict_only=False):
         batch_size = x.size()[0]
 
         x_node_emb = self.node_emb(x.clone())
 
         # build node pairs
-        node_pairs = torch.zeros(
-            batch_size, self.total_edges,
-            self.g_dim * 2).cuda()
-        adj_node_emb = x_node_emb.clone()
-        for i in range(self.num_nodes - 1):
-            start = int((self.num_nodes - i - 2) * (self.num_nodes - i - 1) / 2)
-            end = int((self.num_nodes - i) * (self.num_nodes - i - 1) / 2)
-            one = adj_node_emb[:, self.num_nodes-i-1, :].unsqueeze(1)\
-                .repeat(1, self.num_nodes-i-1, 1)
-            two = adj_node_emb[:, 0:self.num_nodes - i - 1, :]
-            node_pairs[:, start:end, :] = torch.cat([one, two], dim=2)
+        node_pairs = torch.cat([x_node_emb[:,self.pair_i],x_node_emb[:,self.pair_j]],axis=-1)
 
         # node2edge
         node_pairs = torch.reshape(
@@ -72,42 +70,65 @@ class GraphBuilder(nn.Module):
         input4prior = edge_emb_2.clone()
         input4post  = edge_emb_2.clone()
 
-        # prior
-        prior_mean_g, prior_std_g, prior_b = self.prior_enc(input4prior)
-        prior_mij = self.prior_mij(prior_b)
-        prior_mean_g = prior_mean_g.reshape(batch_size, self.total_edges)
-        prior_std_g = prior_std_g.reshape(batch_size, self.total_edges)
-        prior_mij = prior_mij.reshape(batch_size, self.total_edges)
-        prior_mij = 0.4 * sigmoid(prior_mij)
+        if not predict_only:
+            # prior
+            prior_mean_g, prior_std_g, prior_b = self.prior_enc(input4prior)
+            prior_mij = self.prior_mij(prior_b)
+            prior_mean_g = prior_mean_g.reshape(batch_size, self.total_edges)
+            prior_std_g = prior_std_g.reshape(batch_size, self.total_edges)
+            prior_mij = prior_mij.reshape(batch_size, self.total_edges)
+            prior_mij = 0.4 * sigmoid(prior_mij)
 
-        # post
-        post_mean_g, post_std_g, post_b = self.post_enc(input4post)
-        post_mean_approx_g = self.post_mean_approx_g(post_b)
-        post_std_approx_g = self.post_std_approx_g(post_b)
-        post_mean_g = post_mean_g.reshape(batch_size, self.total_edges)
-        post_std_g = post_std_g.reshape(batch_size, self.total_edges)
-        post_mean_approx_g = post_mean_approx_g.reshape(batch_size, self.total_edges)
-        post_std_approx_g = post_std_approx_g.reshape(batch_size, self.total_edges)
+            # post
+            post_mean_g, post_std_g, post_b = self.post_enc(input4post)
+            post_mean_approx_g = self.post_mean_approx_g(post_b)
+            post_std_approx_g = self.post_std_approx_g(post_b)
+            post_mean_g = post_mean_g.reshape(batch_size, self.total_edges)
+            post_std_g = post_std_g.reshape(batch_size, self.total_edges)
+            post_mean_approx_g = post_mean_approx_g.reshape(batch_size, self.total_edges)
+            post_std_approx_g = post_std_approx_g.reshape(batch_size, self.total_edges)
 
-        # estimate post mij for Binomial Dis
-        eps = 1e-6
-        nij = 2.0 * post_mean_approx_g - 1.0
-        nij_ = nij*nij + 8.0*post_std_approx_g*post_std_approx_g
-        post_mij = 0.25 * (nij + torch.sqrt(nij_)) + eps
-        
-        # reparameterization: sampling alpha_tilda and alpha_bar
-        alpha_bar, alpha_tilde = self.sample_repara(post_mean_g, post_std_g, post_mij)
+            # estimate post mij for Binomial Dis
+            eps = 1e-6
+            nij = 2.0 * post_mean_approx_g - 1.0
+            nij_ = nij*nij + 8.0*post_std_approx_g*post_std_approx_g
+            post_mij = 0.25 * (nij + torch.sqrt(nij_)) + eps
+            
+            # reparameterization: sampling alpha_tilda and alpha_bar
+            alpha_bar, alpha_tilde = self.sample_repara(post_mean_g, post_std_g, post_mij)
+            
+        else:
+            # post
+            post_mean_g, _, post_b = self.post_enc(input4post)
+            post_mean_approx_g = self.post_mean_approx_g(post_b)
+            post_std_approx_g = self.post_std_approx_g(post_b)
+            post_mean_g = post_mean_g.reshape(batch_size, self.total_edges)
+            post_mean_approx_g = post_mean_approx_g.reshape(batch_size, self.total_edges)
+            post_std_approx_g = post_std_approx_g.reshape(batch_size, self.total_edges)
+            
+            # estimate post mij for Binomial Dis
+            eps = 1e-6
+            nij = 2.0 * post_mean_approx_g - 1.0
+            nij_ = nij*nij + 8.0*post_std_approx_g*post_std_approx_g
+            post_mij = 0.25 * (nij + torch.sqrt(nij_)) + eps
+            
+            # reparameterization: sampling alpha_tilda and alpha_bar
+            alpha_bar, alpha_tilde = self.sample_repara_noBias(post_mean_g, post_mij)
 
         # graph embedding
         H_g, A = self.gcn1(x, alpha_bar)
         H_g = self.gcn2(H_g, A)
 
         # regularization
-        kl_g = self.kld_loss_gauss(alpha_tilde * post_mean_g,
-                                   torch.sqrt(alpha_tilde) * post_std_g,
-                                   alpha_tilde * prior_mean_g,
-                                   torch.sqrt(alpha_tilde) * prior_std_g)
-        kl_b = self.kld_loss_binomial_upper_bound(post_mij, prior_mij)
+        if not predict_only:
+            kl_g = self.kld_loss_gauss(alpha_tilde * post_mean_g,
+                                    torch.sqrt(alpha_tilde) * post_std_g,
+                                    alpha_tilde * prior_mean_g,
+                                    torch.sqrt(alpha_tilde) * prior_std_g)
+            kl_b = self.kld_loss_binomial_upper_bound(post_mij, prior_mij)
+        else:
+            kl_g = torch.tensor(0.0)
+            kl_b = torch.tensor(0.0)
 
         # return dic for next iter and optimization
         outputs = {
@@ -141,6 +162,14 @@ class GraphBuilder(nn.Module):
 
         return alpha_bar, alpha_tilde
 
+    def sample_repara_noBias(self, mean, mij):
+        alpha_tilde = softplus(mij)
+
+        s_ij = alpha_tilde * mean
+        alpha_bar = s_ij * alpha_tilde
+
+        return alpha_bar, alpha_tilde
+
     def kld_loss_gauss(self, mean_post, std_post, mean_prior, std_prior, eps=1e-6):
         kld_element = (2 * torch.log(std_prior + eps) - 2 * torch.log(std_post + eps) +
                        ((std_post).pow(2) + (mean_post - mean_prior).pow(2)) /
@@ -151,6 +180,31 @@ class GraphBuilder(nn.Module):
         kld_element = mij_prior - mij_post + \
                        mij_post * (torch.log(mij_post+eps) - torch.log(mij_prior+eps))
         return torch.sum(torch.abs(kld_element))
+
+    def vector2matrix(self, A):
+        if self.num_nodes is None:
+            num_node = int(math.sqrt(1+A.shape[-1]*8)+1)//2
+        else:
+            num_node = self.num_nodes
+        if(len(A.shape)==2):
+            A_M = torch.zeros(A.shape[0], num_node, num_node).cuda()
+            eid = 0
+            for i in range(num_node):
+                for j in range(i):
+                    A_M[:,i,j] = A[:,eid]
+                    A_M[:,j,i] = A[:,eid]
+                    eid+=1
+        else:
+            A_M = torch.zeros(num_node, num_node).cuda()
+            eid = 0
+            for i in range(num_node):
+                for j in range(i):
+                    A_M[i,j] = A[eid]
+                    A_M[j,i] = A[eid]
+                    eid+=1
+        A_M += torch.eye(num_node).cuda()
+        return A_M
+
 
 
 class encode_mean_std(nn.Module):
